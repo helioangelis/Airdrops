@@ -75,6 +75,10 @@ button.btn.danger{background:var(--red); color:#fff;}
     <div class="search-results" id="searchResults"></div>
     <div class="section-title" id="crLabel" style="display:none;">CryptoRank</div>
     <div class="search-results" id="crResults"></div>
+    <div class="section-title" id="cpLabel" style="display:none;">CoinPaprika</div>
+    <div class="search-results" id="cpResults"></div>
+    <div class="section-title" id="dlLabel" style="display:none;">DefiLlama (protocolos DeFi)</div>
+    <div class="search-results" id="dlResults"></div>
     <div class="section-title">Não achou? Adicione manualmente</div>
     <label>Nome do projeto</label>
     <input type="text" id="manName">
@@ -92,6 +96,37 @@ button.btn.danger{background:var(--red); color:#fff;}
   <div class="screen" id="screen-detail">
     <button class="back" onclick="showScreen('home')">← Voltar</button>
     <div id="detailBody"></div>
+  </div>
+
+  <!-- DROPS (CryptoRank Drophunting) -->
+  <div class="screen" id="screen-drops">
+    <div class="row">
+      <select id="dropRewardType" onchange="loadDrops(1)">
+        <option value="airdrop">Airdrop</option>
+        <option value="points">Pontos</option>
+        <option value="whitelist">Whitelist</option>
+        <option value="nft">NFT</option>
+        <option value="role">Role</option>
+        <option value="ambassador">Ambassador</option>
+        <option value="fee">Fee</option>
+        <option value="spaceships">Spaceships</option>
+      </select>
+      <select id="dropStatus" onchange="loadDrops(1)">
+        <option value="">Todos status</option>
+        <option value="POTENTIAL">Potencial</option>
+        <option value="CONFIRMED">Confirmado</option>
+        <option value="VERIFICATION">Verificação</option>
+        <option value="REWARD_AVAILABLE">Recompensa disponível</option>
+        <option value="DISTRIBUTED">Distribuído</option>
+        <option value="SNAPSHOT">Snapshot</option>
+        <option value="INACTIVE">Inativo</option>
+      </select>
+    </div>
+    <div id="dropsList"></div>
+    <div class="row" id="dropsPager" style="display:none;">
+      <button class="btn secondary" onclick="loadDrops(dropsPage-1)">← Anterior</button>
+      <button class="btn secondary" onclick="loadDrops(dropsPage+1)">Próxima →</button>
+    </div>
   </div>
 
   <div class="screen" id="screen-lists">
@@ -127,6 +162,7 @@ button.btn.danger{background:var(--red); color:#fff;}
 <div class="navbar">
   <button class="navbtn active" data-screen="home" onclick="showScreen('home')"><span class="ico">📋</span>Projetos</button>
   <button class="navbtn" data-screen="add" onclick="showScreen('add')"><span class="ico">➕</span>Adicionar</button>
+  <button class="navbtn" data-screen="drops" onclick="showScreen('drops')"><span class="ico">🔥</span>Drops</button>
   <button class="navbtn" data-screen="lists" onclick="showScreen('lists')"><span class="ico">🗂️</span>Listas</button>
   <button class="navbtn" data-screen="settings" onclick="showScreen('settings')"><span class="ico">⚙️</span>Config</button>
 </div>
@@ -151,12 +187,13 @@ function showScreen(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active', b.dataset.screen===name));
-  const titles = {home:'Rastreador de Projetos', add:'Adicionar Projeto', lists:'Minhas Listas', settings:'Configurações', detail:'', listdetail:''};
+  const titles = {home:'Rastreador de Projetos', add:'Adicionar Projeto', drops:'🔥 Drops (Airdrops)', lists:'Minhas Listas', settings:'Configurações', detail:'', listdetail:''};
   document.getElementById('pageTitle').textContent = titles[name] ?? '';
   document.getElementById('filterTabs').style.display = (name==='home') ? 'flex' : 'none';
   if(name==='home') renderHome();
   if(name==='lists') renderLists();
   if(name==='settings') loadSettingsForm();
+  if(name==='drops') loadDrops(1);
 }
 
 function renderFilterTabs(){
@@ -186,16 +223,28 @@ function renderHome(){
 }
 
 function cardHtml(p){
-  const cg = p.cgData || p.crData;
+  const cg = p.cgData || p.crData || p.cpData;
+  if(p.source==='defillama'){
+    const dl = p.dlData;
+    const img = p.image ? `<img src="${p.image}">` : `<div class="icon-fallback">${esc((p.name||'?')[0].toUpperCase())}</div>`;
+    const chgHtml = dl && dl.change1d!=null ? `<div class="${dl.change1d>=0?'up':'down'}">${dl.change1d>=0?'+':''}${dl.change1d.toFixed(2)}%</div>` : '';
+    return `<div class="card" onclick="openDetail('${p.id}')">
+      ${img}
+      <div class="info"><div class="name">${esc(p.name)}</div><div class="sym">${dl?dl.category||'DeFi':'DeFi'}</div></div>
+      <div class="price"><div class="val">${dl?'TVL $'+formatNum(dl.tvl):'—'}</div>${chgHtml}</div>
+      <button class="star ${p.favorite?'fav':''}" onclick="event.stopPropagation(); toggleFav('${p.id}')">★</button>
+    </div>`;
+  }
   const price = cg ? '$'+formatNum(cg.price) : '—';
   const chg = cg && cg.chg24!=null ? cg.chg24 : null;
   const chgHtml = chg==null ? '' : `<div class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`;
   const img = p.image ? `<img src="${p.image}">` : `<div class="icon-fallback">${esc((p.name||'?')[0].toUpperCase())}</div>`;
+  const dropBadge = p.dropInfo ? `<span class="chip">${esc(p.dropInfo.rewardType)}</span>` : '';
   return `<div class="card" onclick="openDetail('${p.id}')">
     ${img}
     <div class="info">
       <div class="name">${esc(p.name)}</div>
-      <div class="sym">${esc(p.symbol||p.category||'')}</div>
+      <div class="sym">${esc(p.symbol||p.category||'')} ${dropBadge}</div>
     </div>
     <div class="price">
       <div class="val">${price}</div>
@@ -223,11 +272,15 @@ document.getElementById('searchInput').addEventListener('input', e=>{
   if(q.length<2){
     document.getElementById('searchResults').innerHTML='';
     document.getElementById('crResults').innerHTML='';
+    document.getElementById('cpResults').innerHTML='';
+    document.getElementById('dlResults').innerHTML='';
     document.getElementById('cgLabel').style.display='none';
     document.getElementById('crLabel').style.display='none';
+    document.getElementById('cpLabel').style.display='none';
+    document.getElementById('dlLabel').style.display='none';
     return;
   }
-  searchTimer = setTimeout(()=>{ doSearch(q); doSearchCryptoRank(q); }, 400);
+  searchTimer = setTimeout(()=>{ doSearch(q); doSearchCryptoRank(q); doSearchCoinPaprika(q); doSearchDefiLlama(q); }, 400);
 });
 async function doSearch(q){
   const lbl = document.getElementById('cgLabel'); lbl.style.display='block';
@@ -317,6 +370,171 @@ async function fetchCryptoRankDetails(id){
     DB.projects = ps;
   }catch(err){ console.log('erro cryptorank', err); }
 }
+
+// ---------- COINPAPRIKA (grátis, sem chave) ----------
+async function doSearchCoinPaprika(q){
+  const lbl = document.getElementById('cpLabel');
+  const el = document.getElementById('cpResults');
+  lbl.style.display='block';
+  el.innerHTML = '<div class="empty">Buscando...</div>';
+  try{
+    const res = await fetch(`https://api.coinpaprika.com/v1/search?q=${encodeURIComponent(q)}&c=currencies&limit=8`);
+    if(!res.ok){ el.innerHTML = `<div class="empty">CoinPaprika retornou erro ${res.status}.</div>`; return; }
+    const data = await res.json();
+    const coins = (data.currencies || []).slice(0,8);
+    if(coins.length===0){ el.innerHTML = '<div class="empty">Nada encontrado na CoinPaprika.</div>'; return; }
+    el.innerHTML = coins.map(c=>`<div class="card" onclick="addFromCoinPaprika('${c.id}','${esc(c.name)}','${esc(c.symbol||'')}')">
+      <div class="icon-fallback">${esc((c.name||'?')[0].toUpperCase())}</div>
+      <div class="info"><div class="name">${esc(c.name)}</div><div class="sym">${esc((c.symbol||'').toUpperCase())} ${c.rank?'· Rank #'+c.rank:''}</div></div>
+    </div>`).join('');
+  }catch(err){
+    el.innerHTML = '<div class="empty">Erro ao buscar na CoinPaprika (sem internet?).</div>';
+  }
+}
+function addFromCoinPaprika(id, name, symbol){
+  const ps = DB.projects;
+  if(ps.find(p=>p.cpId===id)){ toast('Projeto já adicionado'); return; }
+  const p = { id: uid(), name, symbol, source:'coinpaprika', cpId:id, favorite:false, notes:'', category:'', website:'', twitter:'', addedAt:Date.now() };
+  ps.push(p); DB.projects = ps;
+  toast('Adicionado! Buscando dados da CoinPaprika...');
+  document.getElementById('searchInput').value='';
+  ['searchResults','crResults','cpResults','dlResults'].forEach(id=>document.getElementById(id).innerHTML='');
+  ['cgLabel','crLabel','cpLabel','dlLabel'].forEach(id=>document.getElementById(id).style.display='none');
+  fetchCoinPaprikaDetails(p.id).then(()=>showScreen('home'));
+}
+async function fetchCoinPaprikaDetails(id){
+  const ps = DB.projects; const p = ps.find(x=>x.id===id);
+  if(!p || !p.cpId) return;
+  try{
+    const [tRes, cRes] = await Promise.all([
+      fetch(`https://api.coinpaprika.com/v1/tickers/${p.cpId}`),
+      fetch(`https://api.coinpaprika.com/v1/coins/${p.cpId}`)
+    ]);
+    if(tRes.ok){
+      const t = await tRes.json();
+      const usd = t.quotes?.USD || {};
+      p.cpData = { price: usd.price, chg24: usd.percent_change_24h, marketCap: usd.market_cap, rank: t.rank, lastUpdated: Date.now() };
+    }
+    if(cRes.ok){
+      const c = await cRes.json();
+      p.description = p.description || c.description;
+      const links = c.links_extended || [];
+      const web = links.find(l=>l.type==='website'); const tw = links.find(l=>l.type==='twitter');
+      p.website = p.website || (web ? web.url : (c.links?.website?.[0]||''));
+      p.twitter = p.twitter || (tw ? '@'+tw.url.split('/').filter(Boolean).pop() : '');
+    }
+    DB.projects = ps;
+  }catch(err){ console.log('erro coinpaprika', err); }
+}
+
+// ---------- DEFILLAMA (grátis, sem chave — protocolos DeFi/TVL) ----------
+async function getDefiLlamaProtocols(){
+  const cacheRaw = localStorage.getItem('rpt_defillama_cache');
+  if(cacheRaw){
+    try{
+      const cache = JSON.parse(cacheRaw);
+      if(Date.now() - cache.ts < 24*60*60*1000) return cache.data;
+    }catch(e){}
+  }
+  const res = await fetch('https://api.llama.fi/protocols');
+  const data = await res.json();
+  localStorage.setItem('rpt_defillama_cache', JSON.stringify({ts:Date.now(), data}));
+  return data;
+}
+async function doSearchDefiLlama(q){
+  const lbl = document.getElementById('dlLabel');
+  const el = document.getElementById('dlResults');
+  lbl.style.display='block';
+  el.innerHTML = '<div class="empty">Buscando...</div>';
+  try{
+    const protocols = await getDefiLlamaProtocols();
+    const ql = q.toLowerCase();
+    const matches = protocols.filter(p=>p.name.toLowerCase().includes(ql) || (p.symbol||'').toLowerCase()===ql).slice(0,6);
+    if(matches.length===0){ el.innerHTML = '<div class="empty">Nenhum protocolo DeFi encontrado com esse nome.</div>'; return; }
+    el.innerHTML = matches.map(p=>`<div class="card" onclick='addFromDefiLlama(${JSON.stringify(p.slug)}, ${JSON.stringify(p.name)}, ${JSON.stringify(p.symbol||"")})'>
+      ${p.logo?`<img src="${p.logo}">`:`<div class="icon-fallback">${esc((p.name||'?')[0].toUpperCase())}</div>`}
+      <div class="info"><div class="name">${esc(p.name)}</div><div class="sym">TVL $${formatNum(p.tvl)}</div></div>
+    </div>`).join('');
+  }catch(err){
+    el.innerHTML = '<div class="empty">Erro ao buscar na DefiLlama (sem internet?).</div>';
+  }
+}
+function addFromDefiLlama(slug, name, symbol){
+  const ps = DB.projects;
+  if(ps.find(p=>p.dlSlug===slug)){ toast('Projeto já adicionado'); return; }
+  const p = { id: uid(), name, symbol, source:'defillama', dlSlug:slug, favorite:false, notes:'', category:'DeFi', website:'', twitter:'', addedAt:Date.now() };
+  ps.push(p); DB.projects = ps;
+  toast('Adicionado! Buscando dados da DefiLlama...');
+  document.getElementById('searchInput').value='';
+  ['searchResults','crResults','cpResults','dlResults'].forEach(id=>document.getElementById(id).innerHTML='');
+  ['cgLabel','crLabel','cpLabel','dlLabel'].forEach(id=>document.getElementById(id).style.display='none');
+  fetchDefiLlamaDetails(p.id).then(()=>showScreen('home'));
+}
+async function fetchDefiLlamaDetails(id){
+  const ps = DB.projects; const p = ps.find(x=>x.id===id);
+  if(!p || !p.dlSlug) return;
+  try{
+    const protocols = await getDefiLlamaProtocols();
+    const d = protocols.find(x=>x.slug===p.dlSlug);
+    if(!d) return;
+    p.image = p.image || d.logo;
+    p.website = p.website || d.url;
+    p.twitter = p.twitter || (d.twitter ? '@'+d.twitter : '');
+    p.description = p.description || d.description;
+    p.dlData = { tvl: d.tvl, change1d: d.change_1d, change7d: d.change_7d, category: d.category, chains: (d.chains||[]).join(', '), lastUpdated: Date.now() };
+    DB.projects = ps;
+  }catch(err){ console.log('erro defillama', err); }
+}
+
+// ---------- DROPHUNTING (CryptoRank - base de dados de airdrops) ----------
+let dropsPage = 1;
+async function loadDrops(page){
+  dropsPage = page < 1 ? 1 : page;
+  const key = DB.settings.cryptorankKey;
+  const el = document.getElementById('dropsList');
+  const pager = document.getElementById('dropsPager');
+  pager.style.display='none';
+  if(!key){ el.innerHTML = '<div class="empty">Configure sua chave da CryptoRank em Config para ver esta lista.</div>'; return; }
+  const rewardType = document.getElementById('dropRewardType').value;
+  const status = document.getElementById('dropStatus').value;
+  el.innerHTML = '<div class="empty">Carregando...</div>';
+  try{
+    let url = `https://api.cryptorank.io/v3/drophunting/list?page=${dropsPage}&rewardType=${rewardType}&sortBy=lastStatusUpdate&sortOrder=desc`;
+    if(status) url += `&activityStatus=${status}`;
+    const res = await fetch(url, { headers: { 'X-Api-Key': key } });
+    if(res.status===403){
+      el.innerHTML = '<div class="empty">Seu plano da CryptoRank não inclui o Drophunting (exige plano Advanced ou superior). Os outros recursos do app continuam funcionando normalmente.</div>';
+      return;
+    }
+    if(res.status===401){
+      el.innerHTML = '<div class="empty">Chave da CryptoRank inválida ou ausente. Confira em Config.</div>';
+      return;
+    }
+    if(!res.ok){ el.innerHTML = `<div class="empty">Erro ${res.status} ao buscar Drophunting.</div>`; return; }
+    const data = await res.json();
+    const items = data.data || [];
+    if(items.length===0){ el.innerHTML = '<div class="empty">Nenhuma atividade encontrada com esses filtros.</div>'; return; }
+    el.innerHTML = items.map(it=>{
+      const img = it.imageUrl ? `<img src="${it.imageUrl}">` : `<div class="icon-fallback">${esc((it.name||'?')[0].toUpperCase())}</div>`;
+      return `<div class="card" onclick="addFromDrop(${it.currencyId},'${esc(it.name)}','${esc(it.symbol||'')}','${it.imageUrl||''}','${it.rewardType}','${it.activityStatus}')">
+        ${img}
+        <div class="info"><div class="name">${esc(it.name)}</div><div class="sym">${esc(it.rewardType)} · ${esc(it.activityStatus)}</div></div>
+      </div>`;
+    }).join('');
+    if(data.meta){ pager.style.display = (data.meta.page>1 || data.meta.hasNextPage) ? 'flex' : 'none'; }
+  }catch(err){
+    el.innerHTML = '<div class="empty">CryptoRank bloqueou a chamada (CORS) ou está fora do ar.</div>';
+  }
+}
+function addFromDrop(currencyId, name, symbol, imageUrl, rewardType, activityStatus){
+  const ps = DB.projects;
+  if(ps.find(p=>p.crId===currencyId)){ toast('Projeto já adicionado'); return; }
+  const p = { id: uid(), name, symbol, source:'cryptorank', crId:currencyId, image:imageUrl||null, favorite:false, notes:'', category:'',
+    website:'', twitter:'', addedAt:Date.now(), dropInfo:{ rewardType, activityStatus, foundAt:Date.now() } };
+  ps.push(p); DB.projects = ps;
+  toast('Adicionado à sua lista de projetos!');
+  fetchCryptoRankDetails(p.id);
+}
 function addFromCoinGecko(id, name, symbol, thumb){
   const ps = DB.projects;
   if(ps.find(p=>p.cgId===id)){ toast('Projeto já adicionado'); return; }
@@ -390,6 +608,32 @@ function renderDetail(id){
       <div>Rank<br><b>${cr.rank?'#'+cr.rank:'—'}</b></div></div>
     </div>`;
   }
+  if(p.cpData){
+    const cp = p.cpData;
+    html += `<div class="section-title">CoinPaprika</div>
+    <div class="card" style="display:block;">
+      <div class="row"><div>Preço<br><b>$${formatNum(cp.price)}</b></div>
+      <div>24h<br><b class="${cp.chg24>=0?'up':'down'}">${cp.chg24!=null?cp.chg24.toFixed(2)+'%':'—'}</b></div>
+      <div>Rank<br><b>${cp.rank?'#'+cp.rank:'—'}</b></div></div>
+    </div>`;
+  }
+  if(p.dlData){
+    const dl = p.dlData;
+    html += `<div class="section-title">DefiLlama (TVL)</div>
+    <div class="card" style="display:block;">
+      <div class="row"><div>TVL<br><b>$${formatNum(dl.tvl)}</b></div>
+      <div>24h<br><b class="${dl.change1d>=0?'up':'down'}">${dl.change1d!=null?dl.change1d.toFixed(2)+'%':'—'}</b></div>
+      <div>7d<br><b class="${dl.change7d>=0?'up':'down'}">${dl.change7d!=null?dl.change7d.toFixed(2)+'%':'—'}</b></div></div>
+      <div style="margin-top:8px;font-size:12px;color:var(--txt2)">Chains: ${esc(dl.chains||'—')}</div>
+    </div>`;
+  }
+  if(p.dropInfo){
+    html += `<div class="section-title">Status do Drop</div>
+    <div class="card" style="display:block;">
+      <span class="chip">${esc(p.dropInfo.rewardType)}</span>
+      <span class="chip">${esc(p.dropInfo.activityStatus)}</span>
+    </div>`;
+  }
 
   html += `<div class="section-title">Links</div><div class="card" style="display:block;">
     ${p.website?`<div><a class="linkbtn" href="${esc(p.website)}" target="_blank">🌐 ${esc(p.website)}</a></div>`:''}
@@ -405,6 +649,8 @@ function renderDetail(id){
     <button class="btn secondary" onclick="toggleFav('${p.id}')">${p.favorite?'★ Favoritado':'☆ Favoritar'}</button>
     ${p.source==='coingecko'?`<button class="btn secondary" onclick="fetchCoinGeckoDetails('${p.id}').then(()=>renderDetail('${p.id}'))">🔄 Atualizar CoinGecko</button>`:''}
     ${p.source==='cryptorank'?`<button class="btn secondary" onclick="fetchCryptoRankDetails('${p.id}').then(()=>renderDetail('${p.id}'))">🔄 Atualizar CryptoRank</button>`:''}
+    ${p.source==='coinpaprika'?`<button class="btn secondary" onclick="fetchCoinPaprikaDetails('${p.id}').then(()=>renderDetail('${p.id}'))">🔄 Atualizar CoinPaprika</button>`:''}
+    ${p.source==='defillama'?`<button class="btn secondary" onclick="fetchDefiLlamaDetails('${p.id}').then(()=>renderDetail('${p.id}'))">🔄 Atualizar DefiLlama</button>`:''}
   </div>
   <div class="row" style="margin-top:8px;">
     <button class="btn" onclick="copyAiPrompt('${p.id}')">🤖 Copiar prompt p/ IA</button>
