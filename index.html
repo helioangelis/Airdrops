@@ -254,31 +254,33 @@ async function doSearchCryptoRank(q){
   lbl.style.display='block';
   el.innerHTML = '<div class="empty">Buscando...</div>';
   try{
-    const res = await fetch(`https://api.cryptorank.io/v2/currencies?search=${encodeURIComponent(q)}&limit=8`, {
+    const res = await fetch(`https://api.cryptorank.io/v3/currencies/search?query=${encodeURIComponent(q)}`, {
       headers: { 'X-Api-Key': key }
     });
-    if(!res.ok){ el.innerHTML = `<div class="empty">CryptoRank retornou erro ${res.status}. Confira a chave em Config.</div>`; return; }
+    if(!res.ok){
+      const errData = await res.json().catch(()=>({}));
+      el.innerHTML = `<div class="empty">CryptoRank: erro ${res.status} ${errData.error?.message||''}. Confira a chave em Config.</div>`;
+      return;
+    }
     const data = await res.json();
-    const coins = (data.data || data.result || []).slice(0,8);
+    const coins = (data.data || []).slice(0,8);
     if(coins.length===0){ el.innerHTML = '<div class="empty">Nada encontrado na CryptoRank.</div>'; return; }
     el.innerHTML = coins.map(c=>{
-      const cid = c.id ?? c.key ?? c.slug;
-      const name = c.name || c.symbol || 'Sem nome';
-      const symbol = (c.symbol||'').toUpperCase();
+      const img = c.imageUrl ? `<img src="${c.imageUrl}">` : `<div class="icon-fallback">${esc((c.name||'?')[0].toUpperCase())}</div>`;
       const rank = c.rank ? '· Rank #'+c.rank : '';
-      return `<div class="card" onclick="addFromCryptoRank('${cid}','${esc(name)}','${esc(symbol)}')">
-        <div class="icon-fallback">${esc((name||'?')[0].toUpperCase())}</div>
-        <div class="info"><div class="name">${esc(name)}</div><div class="sym">${esc(symbol)} ${rank}</div></div>
+      return `<div class="card" onclick="addFromCryptoRank(${c.id},'${esc(c.name)}','${esc(c.symbol||'')}','${c.imageUrl||''}')">
+        ${img}
+        <div class="info"><div class="name">${esc(c.name)}</div><div class="sym">${esc((c.symbol||'').toUpperCase())} ${rank}</div></div>
       </div>`;
     }).join('');
   }catch(err){
     el.innerHTML = '<div class="empty">CryptoRank bloqueou a chamada direta do navegador (CORS) ou está fora do ar. Use cadastro manual e cole os dados nas notas.</div>';
   }
 }
-function addFromCryptoRank(id, name, symbol){
+function addFromCryptoRank(id, name, symbol, imageUrl){
   const ps = DB.projects;
   if(ps.find(p=>p.crId===id)){ toast('Projeto já adicionado'); return; }
-  const p = { id: uid(), name, symbol, source:'cryptorank', crId:id, favorite:false, notes:'', category:'', website:'', twitter:'', addedAt:Date.now() };
+  const p = { id: uid(), name, symbol, source:'cryptorank', crId:id, image:imageUrl||null, favorite:false, notes:'', category:'', website:'', twitter:'', addedAt:Date.now() };
   ps.push(p); DB.projects = ps;
   toast('Adicionado! Buscando dados da CryptoRank...');
   document.getElementById('searchInput').value='';
@@ -291,17 +293,25 @@ async function fetchCryptoRankDetails(id){
   const key = DB.settings.cryptorankKey;
   if(!p || !p.crId || !key) return;
   try{
-    const res = await fetch(`https://api.cryptorank.io/v2/currencies/${p.crId}`, { headers: { 'X-Api-Key': key } });
+    const res = await fetch(`https://api.cryptorank.io/v3/currencies/${p.crId}?convert=USD`, { headers: { 'X-Api-Key': key } });
     if(!res.ok) return;
     const d = await res.json();
-    const c = d.data || d;
-    p.website = p.website || (c.links?.website?.[0]) || '';
-    p.twitter = p.twitter || (c.links?.twitter ? '@'+c.links.twitter.split('/').pop() : '');
+    const c = d.data;
+    if(!c) return;
+    p.image = p.image || c.imageUrl;
+    p.description = p.description || c.description;
+    p.category = p.category || (c.category ? c.category.name : '');
+    const links = c.links || [];
+    const web = links.find(l=>l.type==='web');
+    const tw = links.find(l=>l.type==='twitter');
+    p.website = p.website || (web ? web.url : '');
+    p.twitter = p.twitter || (tw ? '@'+tw.url.split('/').filter(Boolean).pop() : '');
     p.crData = {
-      price: c.values?.USD?.price ?? c.price,
-      chg24: c.values?.USD?.percentChange?.h24 ?? c.percentChange24h,
-      marketCap: c.values?.USD?.marketCap ?? c.marketCap,
+      price: c.price!=null ? parseFloat(c.price) : null,
+      chg24: c.pricePercentChange?.h24 ?? null,
+      marketCap: c.marketCap!=null ? parseFloat(c.marketCap) : null,
       rank: c.rank,
+      lifecycle: c.lifecycle,
       lastUpdated: Date.now()
     };
     DB.projects = ps;
