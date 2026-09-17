@@ -147,6 +147,10 @@ button.btn.danger{background:var(--red); color:#fff;}
     <label>API Key</label>
     <input type="text" id="cryptorankKey" placeholder="Sua chave da CryptoRank">
     <button class="btn secondary" onclick="saveSettings()">Salvar</button>
+    <div id="crBlockedNotice" style="display:none; margin-top:10px;">
+      <p style="color:var(--txt2); font-size:12px;">⚠️ A busca da CryptoRank foi desativada automaticamente porque seu plano retornou erro 403 (endpoint exige plano superior). Se você trocou de plano, toque para tentar de novo.</p>
+      <button class="btn secondary" onclick="reenableCryptoRankSearch()">Tentar busca da CryptoRank novamente</button>
+    </div>
     <p style="color:var(--txt2); font-size:12px;">Se a CryptoRank bloquear a chamada pelo navegador (CORS), os dados dela precisam ser inseridos manualmente nas notas do projeto.</p>
 
     <div class="section-title">Backup (copiar/colar texto)</div>
@@ -304,12 +308,19 @@ async function doSearchCryptoRank(q){
   const lbl = document.getElementById('crLabel');
   const el = document.getElementById('crResults');
   if(!key){ lbl.style.display='none'; el.innerHTML=''; return; }
+  if(DB.settings.cryptorankSearchBlocked){ lbl.style.display='none'; el.innerHTML=''; return; }
   lbl.style.display='block';
   el.innerHTML = '<div class="empty">Buscando...</div>';
   try{
     const res = await fetch(`https://api.cryptorank.io/v3/currencies/search?query=${encodeURIComponent(q)}`, {
       headers: { 'X-Api-Key': key }
     });
+    if(res.status===403){
+      const s = DB.settings; s.cryptorankSearchBlocked = true; DB.settings = s;
+      lbl.style.display='none'; el.innerHTML='';
+      toast('Busca da CryptoRank desativada (plano não cobre). Reative em Config quando trocar de plano.');
+      return;
+    }
     if(!res.ok){
       const errData = await res.json().catch(()=>({}));
       el.innerHTML = `<div class="empty">CryptoRank: erro ${res.status} ${errData.error?.message||''}. Confira a chave em Config.</div>`;
@@ -721,9 +732,17 @@ function renderListDetail(){
 
 function loadSettingsForm(){
   document.getElementById('cryptorankKey').value = DB.settings.cryptorankKey || '';
+  document.getElementById('crBlockedNotice').style.display = DB.settings.cryptorankSearchBlocked ? 'block' : 'none';
+}
+function reenableCryptoRankSearch(){
+  const s = DB.settings; delete s.cryptorankSearchBlocked; DB.settings = s;
+  document.getElementById('crBlockedNotice').style.display = 'none';
+  toast('Busca da CryptoRank reativada. Tente pesquisar de novo.');
 }
 function saveSettings(){
-  DB.settings = { cryptorankKey: document.getElementById('cryptorankKey').value.trim() };
+  const s = DB.settings;
+  s.cryptorankKey = document.getElementById('cryptorankKey').value.trim();
+  DB.settings = s;
   toast('Configurações salvas');
 }
 function exportData(){
