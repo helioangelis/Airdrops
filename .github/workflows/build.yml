@@ -49,7 +49,6 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --stacktrace > ../build_log.txt 2>&1
-        continue-on-error: true
 
       - name: Show tail of log on failure
         if: steps.build.outcome == 'failure'
