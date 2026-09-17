@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<script src="https://js.puter.com/v2/"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Rastreador de Projetos</title>
@@ -346,6 +347,7 @@ function addFromCryptoRank(id, name, symbol, imageUrl){
   if(ps.find(p=>p.crId===id)){ toast('Projeto já adicionado'); return; }
   const p = { id: uid(), name, symbol, source:'cryptorank', crId:id, image:imageUrl||null, favorite:false, notes:'', category:'', website:'', twitter:'', addedAt:Date.now() };
   ps.push(p); DB.projects = ps;
+  fetchAiResearch(p.id);
   toast('Adicionado! Buscando dados da CryptoRank...');
   document.getElementById('searchInput').value='';
   document.getElementById('searchResults').innerHTML=''; document.getElementById('crResults').innerHTML='';
@@ -407,6 +409,7 @@ function addFromCoinPaprika(id, name, symbol){
   if(ps.find(p=>p.cpId===id)){ toast('Projeto já adicionado'); return; }
   const p = { id: uid(), name, symbol, source:'coinpaprika', cpId:id, favorite:false, notes:'', category:'', website:'', twitter:'', addedAt:Date.now() };
   ps.push(p); DB.projects = ps;
+  fetchAiResearch(p.id);
   toast('Adicionado! Buscando dados da CoinPaprika...');
   document.getElementById('searchInput').value='';
   ['searchResults','crResults','cpResults','dlResults'].forEach(id=>document.getElementById(id).innerHTML='');
@@ -475,6 +478,7 @@ function addFromDefiLlama(slug, name, symbol){
   if(ps.find(p=>p.dlSlug===slug)){ toast('Projeto já adicionado'); return; }
   const p = { id: uid(), name, symbol, source:'defillama', dlSlug:slug, favorite:false, notes:'', category:'DeFi', website:'', twitter:'', addedAt:Date.now() };
   ps.push(p); DB.projects = ps;
+  fetchAiResearch(p.id);
   toast('Adicionado! Buscando dados da DefiLlama...');
   document.getElementById('searchInput').value='';
   ['searchResults','crResults','cpResults','dlResults'].forEach(id=>document.getElementById(id).innerHTML='');
@@ -543,6 +547,7 @@ function addFromDrop(currencyId, name, symbol, imageUrl, rewardType, activitySta
   const p = { id: uid(), name, symbol, source:'cryptorank', crId:currencyId, image:imageUrl||null, favorite:false, notes:'', category:'',
     website:'', twitter:'', addedAt:Date.now(), dropInfo:{ rewardType, activityStatus, foundAt:Date.now() } };
   ps.push(p); DB.projects = ps;
+  fetchAiResearch(p.id);
   toast('Adicionado à sua lista de projetos!');
   fetchCryptoRankDetails(p.id);
 }
@@ -551,6 +556,7 @@ function addFromCoinGecko(id, name, symbol, thumb){
   if(ps.find(p=>p.cgId===id)){ toast('Projeto já adicionado'); return; }
   const p = { id: uid(), name, symbol: symbol.toUpperCase(), source:'coingecko', cgId:id, image:thumb, favorite:false, notes:'', category:'', website:'', twitter:'', addedAt:Date.now() };
   ps.push(p); DB.projects = ps;
+  fetchAiResearch(p.id);
   toast('Adicionado! Buscando dados...');
   document.getElementById('searchInput').value=''; document.getElementById('searchResults').innerHTML='';
   fetchCoinGeckoDetails(p.id).then(()=>showScreen('home'));
@@ -565,9 +571,33 @@ function addManual(){
     notes: document.getElementById('manNotes').value.trim(),
     favorite:false, addedAt:Date.now() };
   const ps = DB.projects; ps.push(p); DB.projects = ps;
+  fetchAiResearch(p.id);
   ['manName','manCat','manSite','manTwitter','manNotes'].forEach(id=>document.getElementById(id).value='');
   toast('Projeto adicionado manualmente');
   showScreen('home');
+}
+
+// ---------- PESQUISA COM IA (Puter.js + Perplexity Sonar — grátis, sem chave, busca real na web) ----------
+async function fetchAiResearch(id){
+  const ps = DB.projects; const p = ps.find(x=>x.id===id);
+  if(!p) return;
+  p.aiResearchLoading = true; DB.projects = ps;
+  if(currentDetailId===id) renderDetail(id);
+  try{
+    const prompt = `Pesquise informações atuais sobre o projeto cripto "${p.name}"${p.website?' (site: '+p.website+')':''}${p.twitter?' (twitter: '+p.twitter+')':''}. Responda em português do Brasil, direto ao ponto, cobrindo nesta ordem: 1) O que é o projeto (1-2 frases); 2) Como participar — requisitos de elegibilidade para airdrop/pontos, se houver; 3) Principais atualizações dos últimos 30 dias; 4) Sinais de alerta de golpe, se houver. Se não encontrar informações confiáveis sobre algo específico, diga isso claramente em vez de inventar.`;
+    const res = await puter.ai.chat(prompt, { model: 'perplexity/sonar' });
+    const text = res?.message?.content || (typeof res === 'string' ? res : JSON.stringify(res));
+    const ps2 = DB.projects; const p2 = ps2.find(x=>x.id===id);
+    if(p2){ p2.aiResearch = { text, fetchedAt: Date.now() }; delete p2.aiResearchLoading; DB.projects = ps2; }
+  }catch(err){
+    const ps2 = DB.projects; const p2 = ps2.find(x=>x.id===id);
+    if(p2){
+      p2.aiResearch = { text: 'Não foi possível pesquisar agora. Se for a primeira vez usando esse recurso, o Puter.js pode pedir um login gratuito rápido (sem custo) — tente de novo pelo botão abaixo depois de fazer login.', fetchedAt: Date.now(), error:true };
+      delete p2.aiResearchLoading; DB.projects = ps2;
+    }
+    console.log('erro puter ai', err);
+  }
+  if(currentDetailId===id) renderDetail(id);
 }
 
 async function fetchCoinGeckoDetails(id){
@@ -644,6 +674,18 @@ function renderDetail(id){
       <span class="chip">${esc(p.dropInfo.rewardType)}</span>
       <span class="chip">${esc(p.dropInfo.activityStatus)}</span>
     </div>`;
+  }
+
+  html += `<div class="section-title">🔎 Pesquisa com IA (busca real na web)</div>`;
+  if(p.aiResearchLoading){
+    html += `<div class="card" style="display:block;">Pesquisando na web com IA (Perplexity Sonar via Puter.js)... isso pode levar alguns segundos.</div>`;
+  } else if(p.aiResearch){
+    const ago = Math.round((Date.now()-p.aiResearch.fetchedAt)/60000);
+    html += `<div class="card" style="display:block; white-space:pre-wrap; font-size:13px; line-height:1.5;">${esc(p.aiResearch.text)}</div>
+    <div style="font-size:11px;color:var(--txt2);margin:6px 0 10px;">⚠️ Gerado por IA com busca na web — confira as fontes antes de agir. Atualizado há ${ago<1?'agora':ago+' min'}.</div>
+    <button class="btn secondary" onclick="fetchAiResearch('${p.id}')">🔄 Pesquisar novamente</button>`;
+  } else {
+    html += `<div class="card" style="display:block;">Ainda sem pesquisa. <button class="btn secondary" style="margin-top:8px;" onclick="fetchAiResearch('${p.id}')">🔎 Pesquisar agora</button></div>`;
   }
 
   html += `<div class="section-title">Links</div><div class="card" style="display:block;">
