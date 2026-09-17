@@ -71,7 +71,10 @@ button.btn.danger{background:var(--red); color:#fff;}
 
   <div class="screen" id="screen-add">
     <input type="text" id="searchInput" placeholder="Buscar projeto (ex: bitcoin, alphea)...">
+    <div class="section-title" id="cgLabel" style="display:none;">CoinGecko</div>
     <div class="search-results" id="searchResults"></div>
+    <div class="section-title" id="crLabel" style="display:none;">CryptoRank</div>
+    <div class="search-results" id="crResults"></div>
     <div class="section-title">Não achou? Adicione manualmente</div>
     <label>Nome do projeto</label>
     <input type="text" id="manName">
@@ -183,7 +186,7 @@ function renderHome(){
 }
 
 function cardHtml(p){
-  const cg = p.cgData;
+  const cg = p.cgData || p.crData;
   const price = cg ? '$'+formatNum(cg.price) : '—';
   const chg = cg && cg.chg24!=null ? cg.chg24 : null;
   const chgHtml = chg==null ? '' : `<div class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`;
@@ -217,24 +220,92 @@ let searchTimer;
 document.getElementById('searchInput').addEventListener('input', e=>{
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
-  if(q.length<2){ document.getElementById('searchResults').innerHTML=''; return; }
-  searchTimer = setTimeout(()=>doSearch(q), 400);
+  if(q.length<2){
+    document.getElementById('searchResults').innerHTML='';
+    document.getElementById('crResults').innerHTML='';
+    document.getElementById('cgLabel').style.display='none';
+    document.getElementById('crLabel').style.display='none';
+    return;
+  }
+  searchTimer = setTimeout(()=>{ doSearch(q); doSearchCryptoRank(q); }, 400);
 });
 async function doSearch(q){
+  const lbl = document.getElementById('cgLabel'); lbl.style.display='block';
   const el = document.getElementById('searchResults');
   el.innerHTML = '<div class="empty">Buscando...</div>';
   try{
     const res = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`);
     const data = await res.json();
     const coins = (data.coins||[]).slice(0,8);
-    if(coins.length===0){ el.innerHTML = '<div class="empty">Nada encontrado na CoinGecko. Use o formulário manual abaixo.</div>'; return; }
+    if(coins.length===0){ el.innerHTML = '<div class="empty">Nada encontrado na CoinGecko.</div>'; return; }
     el.innerHTML = coins.map(c=>`<div class="card" onclick="addFromCoinGecko('${c.id}','${esc(c.name)}','${esc(c.symbol)}','${c.thumb}')">
       <img src="${c.thumb}">
       <div class="info"><div class="name">${esc(c.name)}</div><div class="sym">${esc(c.symbol.toUpperCase())} ${c.market_cap_rank?'· Rank #'+c.market_cap_rank:''}</div></div>
     </div>`).join('');
   }catch(err){
-    el.innerHTML = '<div class="empty">Erro ao buscar (sem internet?). Use o formulário manual.</div>';
+    el.innerHTML = '<div class="empty">Erro ao buscar na CoinGecko (sem internet?).</div>';
   }
+}
+async function doSearchCryptoRank(q){
+  const key = DB.settings.cryptorankKey;
+  const lbl = document.getElementById('crLabel');
+  const el = document.getElementById('crResults');
+  if(!key){ lbl.style.display='none'; el.innerHTML=''; return; }
+  lbl.style.display='block';
+  el.innerHTML = '<div class="empty">Buscando...</div>';
+  try{
+    const res = await fetch(`https://api.cryptorank.io/v2/currencies?search=${encodeURIComponent(q)}&limit=8`, {
+      headers: { 'X-Api-Key': key }
+    });
+    if(!res.ok){ el.innerHTML = `<div class="empty">CryptoRank retornou erro ${res.status}. Confira a chave em Config.</div>`; return; }
+    const data = await res.json();
+    const coins = (data.data || data.result || []).slice(0,8);
+    if(coins.length===0){ el.innerHTML = '<div class="empty">Nada encontrado na CryptoRank.</div>'; return; }
+    el.innerHTML = coins.map(c=>{
+      const cid = c.id ?? c.key ?? c.slug;
+      const name = c.name || c.symbol || 'Sem nome';
+      const symbol = (c.symbol||'').toUpperCase();
+      const rank = c.rank ? '· Rank #'+c.rank : '';
+      return `<div class="card" onclick="addFromCryptoRank('${cid}','${esc(name)}','${esc(symbol)}')">
+        <div class="icon-fallback">${esc((name||'?')[0].toUpperCase())}</div>
+        <div class="info"><div class="name">${esc(name)}</div><div class="sym">${esc(symbol)} ${rank}</div></div>
+      </div>`;
+    }).join('');
+  }catch(err){
+    el.innerHTML = '<div class="empty">CryptoRank bloqueou a chamada direta do navegador (CORS) ou está fora do ar. Use cadastro manual e cole os dados nas notas.</div>';
+  }
+}
+function addFromCryptoRank(id, name, symbol){
+  const ps = DB.projects;
+  if(ps.find(p=>p.crId===id)){ toast('Projeto já adicionado'); return; }
+  const p = { id: uid(), name, symbol, source:'cryptorank', crId:id, favorite:false, notes:'', category:'', website:'', twitter:'', addedAt:Date.now() };
+  ps.push(p); DB.projects = ps;
+  toast('Adicionado! Buscando dados da CryptoRank...');
+  document.getElementById('searchInput').value='';
+  document.getElementById('searchResults').innerHTML=''; document.getElementById('crResults').innerHTML='';
+  document.getElementById('cgLabel').style.display='none'; document.getElementById('crLabel').style.display='none';
+  fetchCryptoRankDetails(p.id).then(()=>showScreen('home'));
+}
+async function fetchCryptoRankDetails(id){
+  const ps = DB.projects; const p = ps.find(x=>x.id===id);
+  const key = DB.settings.cryptorankKey;
+  if(!p || !p.crId || !key) return;
+  try{
+    const res = await fetch(`https://api.cryptorank.io/v2/currencies/${p.crId}`, { headers: { 'X-Api-Key': key } });
+    if(!res.ok) return;
+    const d = await res.json();
+    const c = d.data || d;
+    p.website = p.website || (c.links?.website?.[0]) || '';
+    p.twitter = p.twitter || (c.links?.twitter ? '@'+c.links.twitter.split('/').pop() : '');
+    p.crData = {
+      price: c.values?.USD?.price ?? c.price,
+      chg24: c.values?.USD?.percentChange?.h24 ?? c.percentChange24h,
+      marketCap: c.values?.USD?.marketCap ?? c.marketCap,
+      rank: c.rank,
+      lastUpdated: Date.now()
+    };
+    DB.projects = ps;
+  }catch(err){ console.log('erro cryptorank', err); }
 }
 function addFromCoinGecko(id, name, symbol, thumb){
   const ps = DB.projects;
@@ -300,6 +371,16 @@ function renderDetail(id){
   }
   if(p.description){ html += `<div class="section-title">Descrição</div><div class="card" style="display:block;font-size:13px;color:var(--txt2)">${esc(p.description)}</div>`; }
 
+  if(p.crData){
+    const cr = p.crData;
+    html += `<div class="section-title">CryptoRank</div>
+    <div class="card" style="display:block;">
+      <div class="row"><div>Preço<br><b>$${formatNum(cr.price)}</b></div>
+      <div>24h<br><b class="${cr.chg24>=0?'up':'down'}">${cr.chg24!=null?cr.chg24.toFixed(2)+'%':'—'}</b></div>
+      <div>Rank<br><b>${cr.rank?'#'+cr.rank:'—'}</b></div></div>
+    </div>`;
+  }
+
   html += `<div class="section-title">Links</div><div class="card" style="display:block;">
     ${p.website?`<div><a class="linkbtn" href="${esc(p.website)}" target="_blank">🌐 ${esc(p.website)}</a></div>`:''}
     ${p.twitter?`<div style="margin-top:6px;"><a class="linkbtn" href="https://twitter.com/${esc((p.twitter||'').replace('@',''))}" target="_blank">🐦 ${esc(p.twitter)}</a></div>`:''}
@@ -312,7 +393,8 @@ function renderDetail(id){
 
   html += `<div class="row" style="margin-top:14px;">
     <button class="btn secondary" onclick="toggleFav('${p.id}')">${p.favorite?'★ Favoritado':'☆ Favoritar'}</button>
-    ${p.source==='coingecko'?`<button class="btn secondary" onclick="fetchCoinGeckoDetails('${p.id}').then(()=>renderDetail('${p.id}'))">🔄 Atualizar dados</button>`:''}
+    ${p.source==='coingecko'?`<button class="btn secondary" onclick="fetchCoinGeckoDetails('${p.id}').then(()=>renderDetail('${p.id}'))">🔄 Atualizar CoinGecko</button>`:''}
+    ${p.source==='cryptorank'?`<button class="btn secondary" onclick="fetchCryptoRankDetails('${p.id}').then(()=>renderDetail('${p.id}'))">🔄 Atualizar CryptoRank</button>`:''}
   </div>
   <div class="row" style="margin-top:8px;">
     <button class="btn" onclick="copyAiPrompt('${p.id}')">🤖 Copiar prompt p/ IA</button>
